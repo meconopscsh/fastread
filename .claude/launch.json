@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fast-read",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/serve.mjs"],
+      "port": 8787
+    },
+    {
+      "name": "fast-read-test",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/serve.mjs", "8788"],
+      "port": 8788
+    }
+  ]
+}
