@@ -15,6 +15,7 @@
   --accent: #2c6db5;
   --accent-ink: #ffffff;
   --accent-soft: rgba(44, 109, 181, .13);
+  --band: rgba(44, 109, 181, .2);
   --mark: #c93b27;
   --flag: #c86f00;
   --ok: #2f8a57;
@@ -33,6 +34,7 @@
     --accent: #6ea8ea;
     --accent-ink: #0c1724;
     --accent-soft: rgba(110, 168, 234, .17);
+    --band: rgba(110, 168, 234, .26);
     --mark: #ff7b64;
     --flag: #ffb445;
     --ok: #5cc489;
@@ -99,6 +101,7 @@ select { background: var(--surface); border: 1px solid var(--line); border-radiu
 .pn-text b { color: var(--mark); font-weight: 600; }
 .pn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 .big-num { font-size: 22px; font-variant-numeric: tabular-nums; color: var(--mark); }
+#mk-need.warn { color: var(--mark); font-weight: 600; }
 .stage { position: relative; }
 
 .passage { --fs: 22px; --cpl: 40; margin: 0 auto; width: calc(var(--cpl) * 1em); max-width: calc(100% - 2.4em); font-size: var(--fs); line-height: 1.9; font-family: var(--mincho); background: var(--surface); padding: .7em 1.2em 0; border-radius: 10px; box-shadow: var(--shadow); border: 1px solid var(--line); overflow: hidden; box-sizing: content-box; line-break: strict; user-select: none; }
@@ -137,11 +140,11 @@ dl.kv dd { margin: 0; }
 .chart { width: 100%; height: auto; display: block; }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
 .chart .axis { fill: var(--muted); font-size: 11px; font-family: var(--ui); }
-.chart .band { fill: var(--accent-soft); }
+.chart .band { fill: var(--band); }
 .chart .ln-pre { fill: none; stroke: var(--accent); stroke-width: 2; }
 .chart .pt-pre { fill: var(--accent); }
-.chart .pt-post { fill: var(--surface); stroke: var(--flag); stroke-width: 2; }
-.chart .pt-ctrl { fill: var(--surface); stroke: var(--muted); stroke-width: 2; }
+.chart .pt-post { fill: none; stroke: var(--flag); stroke-width: 2; }
+.chart .pt-ctrl { fill: none; stroke: var(--muted); stroke-width: 2; }
 .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 6px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
 .table-wrap { overflow-x: auto; }
@@ -222,8 +225,6 @@ const DEFAULT_SETTINGS = {
   fontSize: 22,
   cpl: 40,
   font: 'mincho',
-  volume: 0.5,
-  voice: true,
   stretchMode: 'finger',
   stretchTempo: 'normal',
   stretchReps: 12,
@@ -239,7 +240,8 @@ function normalizeState(s = {}) {
   return {
     version: 1,
     ackCaution: !!s.ackCaution,
-    settings: { ...DEFAULT_SETTINGS, ...(s.settings || {}) },
+    // 今はない設定（音量・音声ガイドなど）は読み込まない
+    settings: { ...DEFAULT_SETTINGS, ...Object.fromEntries(Object.entries(s.settings || {}).filter(([k]) => k in DEFAULT_SETTINGS)) },
     progress: {
       storyId: ids.has(p.storyId) ? p.storyId : (STORIES[0] && STORIES[0].id),
       cursors: Object.fromEntries(Object.entries(p.cursors || {}).filter(([k, v]) => ids.has(k) && Number.isFinite(v) && v >= 0)),
@@ -361,10 +363,12 @@ function pickStart(need, preferId) {
   return { m: model(ids[from]), start: 0 };
 }
 
-function recentBaseline() {
-  const v = state.sessions.slice(-5).map(s => s.pre.count).filter(x => x > 0).sort((a, b) => a - b);
-  return v.length ? v[v.length >> 1] : 100;
+// 直近5回の事前計測の中央値。記録がなければ null
+function medianPre(sessions) {
+  const v = sessions.slice(-5).map(s => s.pre.count).filter(x => x > 0).sort((a, b) => a - b);
+  return v.length ? { value: v[v.length >> 1], n: v.length } : null;
 }
+const recentBaseline = () => medianPre(state.sessions)?.value ?? 100;
 const needFor = (est, mult) => Math.round(est * (mult + 3)) + 300;
 
 // 表示する範囲の終わり。画面からはみ出した分は .passage の overflow で隠れる
@@ -401,84 +405,6 @@ function fitPassage() {
   const avail = window.innerHeight - p.getBoundingClientRect().top - extra - 28;
   p.style.maxHeight = `${Math.max(3, Math.floor(avail / lineH)) * lineH}px`;
 }
-
-// ---------- 音 ----------
-const TONES = {
-  tick: { f: 880, d: 0.08, g: 0.6, type: 'sine' },
-  go: { f: 1320, d: 0.22, g: 0.7, type: 'sine' },
-  end: { f: 440, d: 0.35, g: 0.8, type: 'triangle' },
-  hi: { f: 1046, d: 0.09, g: 0.5, type: 'sine' },
-  lo: { f: 659, d: 0.09, g: 0.5, type: 'sine' },
-  done: { f: 784, d: 0.3, g: 0.5, type: 'sine' },
-};
-
-const audio = {
-  ctx: null,
-  nodes: new Set(),
-  ensure() {
-    if (!this.ctx) {
-      try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { this.ctx = null; }
-    }
-    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
-    return this.ctx;
-  },
-  tone(kind, when) {
-    const T = TONES[kind], ctx = this.ctx;
-    const o = ctx.createOscillator(), gain = ctx.createGain();
-    const v = clamp(state.settings.volume, 0, 1) * T.g;
-    o.type = T.type;
-    o.frequency.value = T.f;
-    gain.gain.setValueAtTime(0, when);
-    gain.gain.linearRampToValueAtTime(v, when + 0.01);
-    gain.gain.setValueAtTime(v, when + T.d - 0.03);
-    gain.gain.linearRampToValueAtTime(0, when + T.d);
-    o.connect(gain).connect(ctx.destination);
-    o.start(when);
-    o.stop(when + T.d + 0.02);
-    this.nodes.add(o);
-    o.onended = () => this.nodes.delete(o);
-  },
-  // events: [[種類, ミリ秒]]。0ミリ秒の音が鳴る瞬間の performance.now() を返す
-  schedule(events) {
-    const lead = 60;
-    const ctx = this.ensure();
-    if (!ctx || ctx.state !== 'running') return performance.now() + lead;
-    const base = ctx.currentTime + lead / 1000;
-    if (state.settings.volume > 0) for (const [kind, off] of events) this.tone(kind, base + off / 1000);
-    const ts = ctx.getOutputTimestamp ? ctx.getOutputTimestamp() : null;
-    if (ts && ts.performanceTime > 0) return ts.performanceTime + (base - ts.contextTime) * 1000;
-    return performance.now() + lead + (ctx.outputLatency || ctx.baseLatency || 0) * 1000;
-  },
-  play(kind) { this.schedule([[kind, 0]]); },
-  cancel() {
-    for (const o of this.nodes) { try { o.stop(); } catch { /* 停止済み */ } }
-    this.nodes.clear();
-  },
-};
-
-const speech = {
-  voice: null,
-  init() {
-    if (!('speechSynthesis' in window)) return;
-    const pick = () => {
-      const vs = speechSynthesis.getVoices().filter(v => /^ja/i.test(v.lang));
-      this.voice = vs.find(v => /Nanami|Keita|Haruka|Ayumi|Ichiro|Sayaka|Kyoko|Otoya/i.test(v.name)) || vs[0] || null;
-    };
-    pick();
-    speechSynthesis.addEventListener('voiceschanged', pick);
-  },
-  say(text) {
-    if (!state.settings.voice || !this.voice) return;
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.voice = this.voice;
-    u.lang = this.voice.lang;
-    u.rate = 1.1;
-    u.volume = clamp(state.settings.volume * 1.6, 0, 1);
-    speechSynthesis.speak(u);
-  },
-  stop() { if ('speechSynthesis' in window) speechSynthesis.cancel(); },
-};
 
 // ---------- 共通UI ----------
 let toastTimer = 0;
@@ -606,20 +532,32 @@ function renderHome() {
 function chartSvg(list) {
   const W = 760, H = 240, L = 44, R = 16, T = 14, B = 30;
   const n = list.length;
-  const top = Math.max(40, Math.ceil(Math.max(...list.flatMap(s => [s.pre.count, s.post.count])) * 1.15 / 40) * 40);
+  // 縦軸は0からにせず、記録のある範囲に絞る。数字の差が見えるようにし、誤差の大きさは±5字の帯で示す
+  const vals = list.flatMap(s => [s.pre.count, s.post.count]);
+  const lo = Math.max(0, Math.min(...vals) - 10), hi = Math.max(...vals) + 10;
+  const step = [5, 10, 20, 25, 50, 100, 200, 500].find(v => (hi - lo) / v <= 5) || 1000;
+  const bottom = Math.floor(lo / step) * step;
+  const top = Math.max(bottom + step * 2, Math.ceil(hi / step) * step);
   const x = i => L + (W - L - R) * (n === 1 ? 0.5 : i / (n - 1));
-  const y = v => T + (H - T - B) * (1 - clamp(v, 0, top) / top);
-  const grid = [0, 0.25, 0.5, 0.75, 1].map(f => Math.round(top * f)).map(v =>
+  const y = v => T + (H - T - B) * (1 - (clamp(v, bottom, top) - bottom) / (top - bottom));
+  const ticks = Array.from({ length: (top - bottom) / step + 1 }, (_, j) => bottom + j * step);
+  const grid = ticks.map(v =>
     `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text x="${L - 8}" y="${y(v) + 4}" class="axis" text-anchor="end">${v}</text>`).join('');
   const band = list.map((s, i) => `${x(i)},${y(s.pre.count + 5)}`)
-    .concat(list.map((s, i) => `${x(i)},${y(Math.max(0, s.pre.count - 5))}`).reverse()).join(' ');
+    .concat(list.map((s, i) => `${x(i)},${y(s.pre.count - 5)}`).reverse()).join(' ');
   const line = list.map((s, i) => `${x(i)},${y(s.pre.count)}`).join(' ');
-  const pts = list.map((s, i) => `
-    <circle cx="${x(i)}" cy="${y(s.post.count)}" r="4" class="${s.type === 'train' ? 'pt-post' : 'pt-ctrl'}"><title>${fmtDateTime(s.date)} 再計測 ${s.post.count}字</title></circle>
+  // 再計測の印は事前計測の点より後に描き、重なっても隠れないようにする（比較用の回は四角）
+  const pre = list.map((s, i) => `
     <circle cx="${x(i)}" cy="${y(s.pre.count)}" r="4" class="pt-pre"><title>${fmtDateTime(s.date)} 事前 ${s.pre.count}字</title></circle>`).join('');
-  const labels = [...new Set([0, Math.floor((n - 1) / 2), n - 1])].map(i =>
+  const post = list.map((s, i) => s.type === 'train'
+    ? `<circle cx="${x(i)}" cy="${y(s.post.count)}" r="4.5" class="pt-post"><title>${fmtDateTime(s.date)} 再計測 ${s.post.count}字</title></circle>`
+    : `<rect x="${x(i) - 4.5}" y="${y(s.post.count) - 4.5}" width="9" height="9" class="pt-ctrl"><title>${fmtDateTime(s.date)} 再計測（比較用）${s.post.count}字</title></rect>`).join('');
+  // 日付は最大7つ。等間隔に置き、最後の回は必ず出す（最後の回との間が間隔の6割に満たないものは省く）
+  const every = Math.max(1, Math.ceil((n - 1) / 6));
+  const marks = Array.from({ length: n }, (_, i) => i).filter(i => i % every === 0 && n - 1 - i >= Math.ceil(every * 0.6)).concat(n - 1);
+  const labels = marks.map(i =>
     `<text x="${x(i)}" y="${H - 8}" class="axis" text-anchor="middle">${fmtMD(list[i].date)}</text>`).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="事前計測と再計測の字数の推移">${grid}<polygon points="${band}" class="band"/><polyline points="${line}" class="ln-pre"/>${pts}${labels}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="事前計測と再計測の字数の推移">${grid}<polygon points="${band}" class="band"/><polyline points="${line}" class="ln-pre"/>${pre}${post}${labels}</svg>`;
 }
 
 function renderHistory() {
@@ -648,8 +586,8 @@ function renderHistory() {
     ${recent.length >= 2 ? `<div class="legend">
       <span><i style="background:var(--accent)"></i>事前計測（毎回初めて読む文章。伸びを見るならこの線）</span>
       <span><i style="border:2px solid var(--flag)"></i>再計測（トレーニング後）</span>
-      <span><i style="border:2px solid var(--muted)"></i>再計測（比較用の回）</span>
-      <span><i style="background:var(--accent-soft);border-radius:2px"></i>±5字（クリック位置の誤差の目安）</span>
+      <span><i style="border:2px solid var(--muted);border-radius:0"></i>再計測（比較用の回）</span>
+      <span><i style="background:var(--band);border-radius:2px"></i>事前計測の±5字（クリック位置の誤差の目安）</span>
     </div>` : ''}
     ${ss.length > recent.length ? `<p class="muted" style="font-size:13px">グラフは直近${recent.length}回分です。表にはすべての記録があります。</p>` : ''}
   </div>
@@ -692,15 +630,6 @@ function renderSettings() {
     <div class="passage preview" id="preview">${passageHtml(sample, 0, passageEnd(sample, 0, 500))}</div>
   </div>
   <div class="card">
-    <h3>音</h3>
-    <div class="form">
-      <label for="set-vol">音量</label>
-      <div class="ctl"><input id="set-vol" type="range" min="0" max="1" step="0.05" data-set="volume" value="${s.volume}"><output data-out="volume"></output><button class="btn sm" data-cmd="test-sound">試しに鳴らす</button></div>
-      <label for="set-voice">音声ガイド</label>
-      <div class="ctl"><input id="set-voice" type="checkbox" data-set="voice" ${s.voice ? 'checked' : ''}><span class="muted" id="voice-info"></span></div>
-    </div>
-  </div>
-  <div class="card">
     <h3>目のストレッチ</h3>
     <div class="form">
       <label for="set-smode">やり方</label>
@@ -726,12 +655,10 @@ function renderSettings() {
 
 function refreshSettings() {
   const s = state.settings;
-  const outs = { fontSize: `${s.fontSize}px`, cpl: `${s.cpl}字`, volume: `${Math.round(s.volume * 100)}%`, multiplier: `×${fmtMult(s.multiplier)}` };
+  const outs = { fontSize: `${s.fontSize}px`, cpl: `${s.cpl}字`, multiplier: `×${fmtMult(s.multiplier)}` };
   for (const [k, v] of Object.entries(outs)) { const o = $(`[data-out="${k}"]`); if (o) o.textContent = v; }
   const p = $('#preview');
   if (p) applyPassageStyle(p);
-  const vi = $('#voice-info');
-  if (vi) vi.textContent = speech.voice ? `（${speech.voice.name}）` : '（このブラウザには日本語の音声がないため、合図の音だけになります）';
 }
 
 function applySetting(el) {
@@ -782,6 +709,8 @@ function showResult(rec) {
   current = 'result';
   $$('#nav button').forEach(b => b.classList.remove('on'));
   const diff = rec.post.count - rec.pre.count;
+  const noise = Math.abs(diff) <= 5; // ±5字はクリック位置の誤差の範囲なので、伸びとして色を付けない
+  const base = medianPre(state.sessions.filter(s => s !== rec));
   const counts = Object.fromEntries(ROUNDS.map(r => [r.key, rec.rounds.filter(x => x === r.key).length]));
   const multNote = rec.nextMultiplier == null ? '' :
     rec.nextMultiplier > rec.multiplier ? '（「読めてしまった」が多かったので上げました）' :
@@ -790,9 +719,10 @@ function showResult(rec) {
   <h2>${rec.type === 'train' ? '今回の結果' : '今回の結果（比較用の回）'}</h2>
   <div class="card">
     <div class="result-main">事前 <b>${rec.pre.count}</b>字 → 再計測 <b>${rec.post.count}</b>字
-      <span class="diff" style="color:${diff > 0 ? 'var(--ok)' : 'var(--muted)'}">（${signed(diff)}字）</span></div>
+      <span class="diff" style="color:${diff > 5 ? 'var(--ok)' : 'var(--muted)'}">（${signed(diff)}字${noise ? '・誤差の範囲' : ''}）</span></div>
     <p class="muted" style="margin-top:0">±5字くらいはクリック位置の誤差の範囲です。${rec.post.mode === 'same' ? '再計測は最初と同じ文章なので、慣れの分も含んだ体感の数字です。' : '再計測は続きの、まだ読んでいない文章で行いました。'}</p>
     <dl class="kv">
+      ${base ? `<dt>事前計測の推移</dt><dd>今回 ${rec.pre.count}字 ／ それまでの直近${base.n}回の中央値 ${base.value}字（${signed(rec.pre.count - base.value)}字）</dd>` : ''}
       <dt>内容の分かり具合</dt><dd>事前：${COMP_LABEL[rec.pre.comp]}　再計測：${COMP_LABEL[rec.post.comp]}</dd>
       ${rec.type === 'train' ? `
       <dt>トレーニング</dt><dd>⚑の位置 ${rec.targetCount}字（×${fmtMult(rec.multiplier)}）／ 届いた ${counts.reached}回・読めてしまった ${counts.readable}回・届かなかった ${counts.short}回</dd>
@@ -815,7 +745,7 @@ let S = null;
 function invalidMsg(what) {
   if (S.invalidWhy === 'lag') return `表示の時間が6秒からずれたので、${what}`;
   const why = S.invalidWhy === 'esc' ? '中断の確認をはさんだ' : '画面が切り替わった';
-  return `${S.invalidShown ? '6秒' : '合図'}の途中で${why}ので、${what}`;
+  return `${S.invalidShown ? '6秒' : 'カウント'}の途中で${why}ので、${what}`;
 }
 
 function noteSeen(m, idx) {
@@ -845,8 +775,6 @@ function showSessionUI(type) {
 
 function endSessionUI() {
   S = null;
-  audio.cancel();
-  speech.stop();
   document.body.classList.remove('running');
   $('#overlay').hidden = true;
   $('#overlay').innerHTML = '';
@@ -906,7 +834,7 @@ function mountPassage(m, start, end, flag = -1) {
   return p;
 }
 
-// 合図(3・2・1)のあと6秒だけ文章を見せる。読み始めの位置に注視点を出しておく
+// 3・2・1のカウントのあと6秒だけ文章を見せる。カウントの数字は読み始めの位置に出す
 function sixSeconds(p) {
   return new Promise((resolve, reject) => {
     const sig = S.ac.signal;
@@ -917,7 +845,7 @@ function sixSeconds(p) {
     const r = first.getBoundingClientRect();
     fix.style.left = `${r.left - sr.left + r.width / 2}px`;
     fix.style.top = `${r.top - sr.top + r.height / 2}px`;
-    fix.style.fontSize = getComputedStyle(p).fontSize;
+    fix.style.fontSize = `${parseFloat(getComputedStyle(p).fontSize) * 1.8}px`;
     fix.textContent = '3';
     fix.hidden = false;
     clearTimeout(toastTimer);
@@ -926,9 +854,8 @@ function sixSeconds(p) {
     p.classList.remove('is-marking');
     document.body.classList.add('running');
 
-    const STEP = 800, GO = STEP * 3, END = GO + 6000;
-    const t0 = audio.schedule([['tick', 0], ['tick', STEP], ['tick', STEP * 2], ['go', GO], ['end', END]]);
-    let raf = 0, shownAt = 0, ended = false;
+    const STEP = 400, GO = STEP * 3, SHOW = 6000;
+    let raf = 0, t0 = 0, shownAt = 0, ended = false;
     const finish = err => {
       if (ended) return;
       ended = true;
@@ -942,7 +869,7 @@ function sixSeconds(p) {
       fix.hidden = true;
       p.classList.add('is-hidden');
       document.body.classList.remove('running');
-      if (err) { audio.cancel(); reject(err); } else resolve(performance.now() - shownAt);
+      if (err) reject(err); else resolve(performance.now() - shownAt);
     };
     const onVis = () => { if (document.hidden) { S.invalidWhy = 'hidden'; finish(INVALID); } };
     const onAbort = () => finish(ABORT);
@@ -951,8 +878,9 @@ function sixSeconds(p) {
     S.cancelRun = () => { S.invalidWhy = 'esc'; finish(INVALID); };
 
     const frame = now => {
-      const el = now - t0;
+      if (!t0) t0 = now;
       if (!shownAt) {
+        const el = now - t0;
         if (el >= GO) {
           shownAt = now;
           fix.hidden = true;
@@ -960,10 +888,9 @@ function sixSeconds(p) {
         } else {
           fix.textContent = String(3 - clamp(Math.floor(el / STEP), 0, 2));
         }
-      }
-      if (el >= END) {
+      } else if (now - shownAt >= SHOW) {
         // フレームが大きく遅れて、見えていた時間が6秒からずれた回は無効にする
-        const lag = Math.abs(now - shownAt - 6000) > 100;
+        const lag = now - shownAt - SHOW > 100;
         if (lag) S.invalidWhy = 'lag';
         finish(lag ? INVALID : null);
         return;
@@ -984,11 +911,13 @@ function markStep(p, label) {
     p.classList.remove('is-hidden');
     p.classList.add('is-marking');
     setPanel(`
-      <div class="pn-title">${label}：ストップ。読めたところの最後の文字をクリックしてください</div>
+      <div class="pn-title">${label}：ストップ。読めた最後の文字をクリックし、内容の分かり具合を選んでください</div>
       <div class="pn-row">
         <span>読めた字数 <b class="big-num" id="mk-count">—</b></span>
         <span class="muted" id="mk-hover"></span>
         <span class="muted">← → で1字ずつ調整できます</span>
+        <span class="spacer"></span>
+        <span class="muted" id="mk-need"></span>
       </div>
       <div class="pn-row">
         <span>内容の分かり具合</span>
@@ -1005,6 +934,12 @@ function markStep(p, label) {
       $('#mk-count').textContent = k >= 0 ? `${k + 1}字` : '—';
       $$('[data-comp]').forEach(b => b.classList.toggle('on', b.dataset.comp === comp));
       $('#mk-ok').disabled = !(k >= 0 && comp);
+      // 確定できない理由を、確定ボタンの上に出しておく
+      const need = $('#mk-need');
+      need.textContent = k < 0 && !comp ? '文字のクリックと分かり具合を選ぶと、確定できます'
+        : k < 0 ? '読めた最後の文字をクリックすると、確定できます'
+        : !comp ? '分かり具合を選ぶと、確定できます（1・2・3キーでも選べます）' : '';
+      if (!need.textContent) need.classList.remove('warn');
     };
     const cleanup = () => {
       finished = true;
@@ -1015,7 +950,10 @@ function markStep(p, label) {
       p.classList.remove('is-marking');
     };
     const done = v => { cleanup(); resolve(v); };
-    const submit = () => { if (k >= 0 && comp) done({ count: k + 1, comp, markIndex: Number(spans[k].dataset.i) }); };
+    const submit = () => {
+      if (k >= 0 && comp) done({ count: k + 1, comp, markIndex: Number(spans[k].dataset.i) });
+      else $('#mk-need').classList.add('warn');
+    };
     const redo = () => {
       const again = state.settings.remeasure === 'same' && label === '再計測' ? '同じ文章で' : '続きの文章で';
       if (confirm(`この計測をやり直しますか？（${again}測り直します）`) && !finished) {
@@ -1044,6 +982,7 @@ function markStep(p, label) {
       else if (e.key === 'Enter') { e.preventDefault(); submit(); }
     };
     const onAbort = () => { cleanup(); reject(ABORT); };
+    refresh();
     p.addEventListener('mouseover', onOver);
     document.addEventListener('click', onClick);
     document.addEventListener('keydown', onKey);
@@ -1070,7 +1009,7 @@ async function measure(kind) {
     const where = kind === 'pre' ? '' : ps.mode === 'same' ? '最初と同じ文章で測ります。' : '続きの、まだ読んでいない文章で測ります。';
     setPanel(`
       <div class="pn-title">${kind === 'pre' ? '①' : '④'} ${label}：ふつうの速さで6秒間、黙読します</div>
-      <div class="pn-text">合図（ピッ・ピッ・ピッ・ポーン）で文章が現れ、6秒たつと消えます。どこまで読めたかを覚えておいてください。${where}</div>
+      <div class="pn-text">読み始めの位置に3・2・1と数字が出たあと、文章が現れ、6秒たつと消えます。どこまで読めたかを覚えておいてください。${where}</div>
       <div class="row"><button class="btn primary" data-act="go">開始（Space）</button></div>`);
     await waitAct({ ' ': 'go', Enter: 'go' });
     setPanel(`<div class="pn-title muted">${label}：読んでいます…</div>`);
@@ -1102,23 +1041,19 @@ const EXERCISES = [
     name: '左右', beats: ['左', '右'], factor: 1, screen: 'lr',
     how: '顔の横（10cmほど離したところ）に両手の人さし指を立て、顔は動かさずに、目だけで左右の指先を交互に見ます。',
     screenHow: '顔は動かさずに、画面の左右に交互に出る点を目だけで追います。',
-    say: '顔は動かさずに、目だけで、左と右を交互に見ます。',
   },
   {
     name: '上下', beats: ['上', '下'], factor: 1, screen: 'ud',
     how: '額の前とあごの前に人さし指を置き、顔は動かさずに、目だけで上下の指先を交互に見ます。',
     screenHow: '顔は動かさずに、画面の上下に交互に出る点を目だけで追います。',
-    say: '目だけで、上と下を交互に見ます。',
   },
   {
     name: '遠近', beats: ['近く', '遠く'], factor: 1.6, screen: null,
     how: '片手の人さし指を顔の前（30cmほど）に立て、指先と部屋の奥にある物を交互に見て、そのたびにピントを合わせます。',
-    say: '近くの指先と、遠くの物を、交互に見ます。',
   },
   {
     name: '視野', beats: ['引いて', '戻して'], factor: 2.2, screen: null, center: true,
     how: '画面の真ん中の点を見つめたまま、両手を顔の横から少しずつ後ろへ引き、見えなくなる直前で止めて戻します。目は真ん中から動かしません。',
-    say: '真ん中の点を見たまま、両手を後ろへ引いて、見えなくなる直前で止めます。',
   },
 ];
 const TEMPO_MS = { slow: 750, normal: 550, fast: 420 };
@@ -1132,7 +1067,7 @@ function stretchStage(ex, screen, word, count, reps) {
   </div>`;
 }
 
-// 拍に合わせて交互に合図を出す。'done' | 'skip' | 'skipall' を返す
+// 拍に合わせて、見る方向を交互に画面に出す。'done' | 'skip' | 'skipall' を返す
 function runBeats(ex, beat, reps, screen) {
   return new Promise((resolve, reject) => {
     const sig = S.ac.signal;
@@ -1175,8 +1110,7 @@ function runBeats(ex, beat, reps, screen) {
     };
     const tick = () => {
       if (ended || paused) return;
-      if (i >= reps * 2) { audio.play('done'); end('done'); return; }
-      audio.play(i % 2 === 0 ? 'hi' : 'lo');
+      if (i >= reps * 2) { end('done'); return; }
       i++;
       draw();
       timer = setTimeout(tick, beat);
@@ -1225,7 +1159,6 @@ async function stretch() {
         <button class="btn" data-act="skipall">ストレッチを全部飛ばす</button>
         <span class="muted" id="auto-start">6秒後に始まります</span>
       </div>`);
-    speech.say(`${ex.name}。${ex.say}`);
     const local = new AbortController();
     const wait = waitAct({ ' ': 'go', Enter: 'go', ArrowRight: 'skip' }, local.signal);
     let left = 6;
@@ -1242,7 +1175,6 @@ async function stretch() {
     const r = await runBeats(ex, Math.max(400, Math.round(base * ex.factor)), reps, screen);
     if (r === 'skipall') break;
   }
-  speech.say('ストレッチはおわりです。');
 }
 
 async function rest(sec) {
@@ -1260,7 +1192,6 @@ async function rest(sec) {
     if (leftSec <= 0) local.abort();
   }, 250);
   try { await waitAct({ ArrowRight: 'skip' }, local.signal); } finally { clearInterval(iv); }
-  audio.play('done');
 }
 
 // ⚑が本文の枠に収まらなければ、1行の字数を枠いっぱいまで広げ、文字を1pxずつ小さくする（このトレーニングの間だけ）
@@ -1296,7 +1227,7 @@ async function training() {
       <div class="pn-title">③ トレーニング ${r + 1}/3：読めないくらいの速さで、⚑まで目で追います</div>
       <div class="pn-text">⚑は ${S.preRes.count}字 × ${fmtMult(S.mult)} ≈ ${S.targetCount}字の位置です。読もうとせず、文字を目で追うだけで構いません。
         ${offscreen ? '<b>⚑が画面の外にあります。ウィンドウを大きく（F11で全画面）してから始めてください。</b>' : shrunk ? '⚑が画面に収まるように、このトレーニングの間だけ1行の字数と文字の大きさを変えています。' : ''}</div>
-      <div class="row">${needStart ? '<button class="btn primary" data-act="go">開始（Space）</button>' : '<span class="muted">合図のあと、読み始めに戻って追います。</span>'}</div>`);
+      <div class="row">${needStart ? '<button class="btn primary" data-act="go">開始（Space）</button>' : '<span class="muted">3・2・1のあと、読み始めに戻って追います。</span>'}</div>`);
     if (needStart) {
       await waitAct({ ' ': 'go', Enter: 'go' });
       $('#panel .row').innerHTML = '<span class="muted">⚑まで目で追います…</span>';
@@ -1420,7 +1351,6 @@ async function runSession(type) {
 function startSession(type) {
   if (S || !STORIES.length) return;
   if (!state.ackCaution) { showCaution(() => startSession(type)); return; }
-  audio.ensure();
   runSession(type);
 }
 
@@ -1434,7 +1364,6 @@ const COMMANDS = {
     save();
     go('home');
   },
-  'test-sound': () => { audio.ensure(); audio.schedule([['tick', 0], ['go', 500], ['end', 1200]]); speech.say('音声ガイドのテストです。'); },
   'export-json': () => download(`six-second-reading-${dayKey(new Date())}.json`,
     JSON.stringify({ app: 'six-second-reading', exportedAt: new Date().toISOString(), state }, null, 1), 'application/json'),
   import: () => $('#import-file').click(),
@@ -1517,7 +1446,6 @@ window.addEventListener('resize', () => { if (S) fitPassage(); });
 // セッションの途中で再読み込みしたり閉じたりしても、読んだ範囲は次回に持ち越す
 window.addEventListener('pagehide', () => { if (S) { commitCursors(); save(); } });
 
-speech.init();
 go('home');
 if (!state.ackCaution && STORIES.length) showCaution(() => {});
 </script>
