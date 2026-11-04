@@ -225,6 +225,7 @@ const DEFAULT_SETTINGS = {
   fontSize: 22,
   cpl: 40,
   font: 'mincho',
+  volume: 0.5,
   stretchMode: 'finger',
   stretchTempo: 'normal',
   stretchReps: 12,
@@ -240,7 +241,7 @@ function normalizeState(s = {}) {
   return {
     version: 1,
     ackCaution: !!s.ackCaution,
-    // 今はない設定（音量・音声ガイドなど）は読み込まない
+    // 今はない設定（音声ガイドなど）は読み込まない
     settings: { ...DEFAULT_SETTINGS, ...Object.fromEntries(Object.entries(s.settings || {}).filter(([k]) => k in DEFAULT_SETTINGS)) },
     progress: {
       storyId: ids.has(p.storyId) ? p.storyId : (STORIES[0] && STORIES[0].id),
@@ -405,6 +406,61 @@ function fitPassage() {
   const avail = window.innerHeight - p.getBoundingClientRect().top - extra - 28;
   p.style.maxHeight = `${Math.max(3, Math.floor(avail / lineH)) * lineH}px`;
 }
+
+// ---------- 音 ----------
+// 6秒の合図（3・2・1のピッ、表示のポーン、6秒の終わり）、ストレッチの拍（高・低を交互）と種目の終わり、休憩の終わり
+const TONES = {
+  tick: { f: 880, d: 0.08, g: 0.6, type: 'sine' },
+  go: { f: 1320, d: 0.22, g: 0.7, type: 'sine' },
+  end: { f: 440, d: 0.35, g: 0.8, type: 'triangle' },
+  hi: { f: 1046, d: 0.09, g: 0.5, type: 'sine' },
+  lo: { f: 659, d: 0.09, g: 0.5, type: 'sine' },
+  done: { f: 784, d: 0.3, g: 0.5, type: 'sine' },
+};
+
+const audio = {
+  ctx: null,
+  nodes: new Set(),
+  ensure() {
+    if (!this.ctx) {
+      try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { this.ctx = null; }
+    }
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    return this.ctx;
+  },
+  tone(kind, when) {
+    const T = TONES[kind], ctx = this.ctx;
+    const o = ctx.createOscillator(), gain = ctx.createGain();
+    const v = clamp(state.settings.volume, 0, 1) * T.g;
+    o.type = T.type;
+    o.frequency.value = T.f;
+    gain.gain.setValueAtTime(0, when);
+    gain.gain.linearRampToValueAtTime(v, when + 0.01);
+    gain.gain.setValueAtTime(v, when + T.d - 0.03);
+    gain.gain.linearRampToValueAtTime(0, when + T.d);
+    o.connect(gain).connect(ctx.destination);
+    o.start(when);
+    o.stop(when + T.d + 0.02);
+    this.nodes.add(o);
+    o.onended = () => this.nodes.delete(o);
+  },
+  // events: [[種類, ミリ秒]]。0ミリ秒の音が鳴る瞬間の performance.now() を返す
+  schedule(events) {
+    const lead = 60;
+    const ctx = this.ensure();
+    if (!ctx || ctx.state !== 'running') return performance.now() + lead;
+    const base = ctx.currentTime + lead / 1000;
+    if (state.settings.volume > 0) for (const [kind, off] of events) this.tone(kind, base + off / 1000);
+    const ts = ctx.getOutputTimestamp ? ctx.getOutputTimestamp() : null;
+    if (ts && ts.performanceTime > 0) return ts.performanceTime + (base - ts.contextTime) * 1000;
+    return performance.now() + lead + (ctx.outputLatency || ctx.baseLatency || 0) * 1000;
+  },
+  play(kind) { return this.schedule([[kind, 0]]); },
+  cancel() {
+    for (const o of this.nodes) { try { o.stop(); } catch { /* 停止済み */ } }
+    this.nodes.clear();
+  },
+};
 
 // ---------- 共通UI ----------
 let toastTimer = 0;
@@ -630,6 +686,13 @@ function renderSettings() {
     <div class="passage preview" id="preview">${passageHtml(sample, 0, passageEnd(sample, 0, 500))}</div>
   </div>
   <div class="card">
+    <h3>音</h3>
+    <div class="form">
+      <label for="set-vol">音量</label>
+      <div class="ctl"><input id="set-vol" type="range" min="0" max="1" step="0.05" data-set="volume" value="${s.volume}"><output data-out="volume"></output><button class="btn sm" data-cmd="test-sound">試しに鳴らす</button><span class="muted">6秒の合図（3・2・1・表示・終わり）、ストレッチの拍、休憩の終わりの音。0%で鳴らしません</span></div>
+    </div>
+  </div>
+  <div class="card">
     <h3>目のストレッチ</h3>
     <div class="form">
       <label for="set-smode">やり方</label>
@@ -655,7 +718,7 @@ function renderSettings() {
 
 function refreshSettings() {
   const s = state.settings;
-  const outs = { fontSize: `${s.fontSize}px`, cpl: `${s.cpl}字`, multiplier: `×${fmtMult(s.multiplier)}` };
+  const outs = { fontSize: `${s.fontSize}px`, cpl: `${s.cpl}字`, volume: `${Math.round(s.volume * 100)}%`, multiplier: `×${fmtMult(s.multiplier)}` };
   for (const [k, v] of Object.entries(outs)) { const o = $(`[data-out="${k}"]`); if (o) o.textContent = v; }
   const p = $('#preview');
   if (p) applyPassageStyle(p);
@@ -775,6 +838,7 @@ function showSessionUI(type) {
 
 function endSessionUI() {
   S = null;
+  audio.cancel();
   document.body.classList.remove('running');
   $('#overlay').hidden = true;
   $('#overlay').innerHTML = '';
@@ -834,7 +898,7 @@ function mountPassage(m, start, end, flag = -1) {
   return p;
 }
 
-// 3・2・1のカウントのあと6秒だけ文章を見せる。カウントの数字は読み始めの位置に出す
+// 3・2・1のカウント（数字と音）のあと6秒だけ文章を見せる。カウントの数字は読み始めの位置に出す
 function sixSeconds(p) {
   return new Promise((resolve, reject) => {
     const sig = S.ac.signal;
@@ -854,8 +918,10 @@ function sixSeconds(p) {
     p.classList.remove('is-marking');
     document.body.classList.add('running');
 
-    const STEP = 400, GO = STEP * 3, SHOW = 6000;
-    let raf = 0, t0 = 0, shownAt = 0, ended = false;
+    // 数字と音は0.4秒ごと。t0 は最初のピッが鳴る瞬間
+    const STEP = 400, GO = STEP * 3, END = GO + 6000;
+    const t0 = audio.schedule([['tick', 0], ['tick', STEP], ['tick', STEP * 2], ['go', GO], ['end', END]]);
+    let raf = 0, shownAt = 0, ended = false;
     const finish = err => {
       if (ended) return;
       ended = true;
@@ -869,7 +935,7 @@ function sixSeconds(p) {
       fix.hidden = true;
       p.classList.add('is-hidden');
       document.body.classList.remove('running');
-      if (err) reject(err); else resolve(performance.now() - shownAt);
+      if (err) { audio.cancel(); reject(err); } else resolve(performance.now() - shownAt);
     };
     const onVis = () => { if (document.hidden) { S.invalidWhy = 'hidden'; finish(INVALID); } };
     const onAbort = () => finish(ABORT);
@@ -878,9 +944,8 @@ function sixSeconds(p) {
     S.cancelRun = () => { S.invalidWhy = 'esc'; finish(INVALID); };
 
     const frame = now => {
-      if (!t0) t0 = now;
+      const el = now - t0;
       if (!shownAt) {
-        const el = now - t0;
         if (el >= GO) {
           shownAt = now;
           fix.hidden = true;
@@ -888,9 +953,10 @@ function sixSeconds(p) {
         } else {
           fix.textContent = String(3 - clamp(Math.floor(el / STEP), 0, 2));
         }
-      } else if (now - shownAt >= SHOW) {
+      }
+      if (el >= END) {
         // フレームが大きく遅れて、見えていた時間が6秒からずれた回は無効にする
-        const lag = now - shownAt - SHOW > 100;
+        const lag = Math.abs(now - shownAt - 6000) > 100;
         if (lag) S.invalidWhy = 'lag';
         finish(lag ? INVALID : null);
         return;
@@ -1009,7 +1075,7 @@ async function measure(kind) {
     const where = kind === 'pre' ? '' : ps.mode === 'same' ? '最初と同じ文章で測ります。' : '続きの、まだ読んでいない文章で測ります。';
     setPanel(`
       <div class="pn-title">${kind === 'pre' ? '①' : '④'} ${label}：ふつうの速さで6秒間、黙読します</div>
-      <div class="pn-text">読み始めの位置に3・2・1と数字が出たあと、文章が現れ、6秒たつと消えます。どこまで読めたかを覚えておいてください。${where}</div>
+      <div class="pn-text">読み始めの位置に3・2・1の数字が出て（ピッ・ピッ・ピッ）、ポーンで文章が現れ、6秒たつと音が鳴って消えます。どこまで読めたかを覚えておいてください。${where}</div>
       <div class="row"><button class="btn primary" data-act="go">開始（Space）</button></div>`);
     await waitAct({ ' ': 'go', Enter: 'go' });
     setPanel(`<div class="pn-title muted">${label}：読んでいます…</div>`);
@@ -1067,7 +1133,7 @@ function stretchStage(ex, screen, word, count, reps) {
   </div>`;
 }
 
-// 拍に合わせて、見る方向を交互に画面に出す。'done' | 'skip' | 'skipall' を返す
+// 拍ごとに音を鳴らし、見る方向を交互に画面に出す。'done' | 'skip' | 'skipall' を返す
 function runBeats(ex, beat, reps, screen) {
   return new Promise((resolve, reject) => {
     const sig = S.ac.signal;
@@ -1079,7 +1145,8 @@ function runBeats(ex, beat, reps, screen) {
       <button class="btn sm" data-beat="skip">飛ばす（→）</button>
       <button class="btn sm" data-beat="skipall">ストレッチを全部飛ばす</button>`;
     if (screen) {
-      ov.innerHTML = `<div class="dot" id="dot"></div><div class="ov-bar"><span id="ov-count"></span>${controls}<span>Esc 中断</span></div>`;
+      // 点は最初の拍の音が鳴るまで隠しておく（位置が決まる前に左上に出ないように）
+      ov.innerHTML = `<div class="dot" id="dot" style="visibility:hidden"></div><div class="ov-bar"><span id="ov-count"></span>${controls}<span>Esc 中断</span></div>`;
       ov.hidden = false;
     } else {
       setPanel(`<div class="pn-title">② ストレッチ：${ex.name}</div><div class="row">${controls}</div>`);
@@ -1092,6 +1159,7 @@ function runBeats(ex, beat, reps, screen) {
         dot.style.left = ex.screen === 'lr' ? (side === 0 ? '5vw' : '95vw') : '50vw';
         // 下の点は、画面下の操作バーに重ならない高さに置く
         dot.style.top = ex.screen === 'ud' ? (side === 0 ? '5vh' : 'calc(100vh - 90px)') : '50vh';
+        dot.style.visibility = '';
         $('#ov-count').textContent = `${ex.name} ${count} / ${reps}`;
       } else {
         $('#stage').innerHTML = stretchStage(ex, false, ex.beats[side], count, reps);
@@ -1110,9 +1178,11 @@ function runBeats(ex, beat, reps, screen) {
     };
     const tick = () => {
       if (ended || paused) return;
-      if (i >= reps * 2) { end('done'); return; }
+      if (i >= reps * 2) { audio.play('done'); end('done'); return; }
+      const at = audio.play(i % 2 === 0 ? 'hi' : 'lo');
       i++;
-      draw();
+      // 画面の切り替えは、音がスピーカーから出る瞬間に合わせる
+      setTimeout(() => { if (!ended) draw(); }, Math.max(0, at - performance.now()));
       timer = setTimeout(tick, beat);
     };
     const toggle = () => {
@@ -1181,7 +1251,7 @@ async function rest(sec) {
   $('#stage').innerHTML = `<div class="stretch"><div class="st-name">休憩</div><div class="st-beat" id="rest-n">${sec}</div>
     <div class="st-how">比較用の回です。ストレッチの代わりに、目を軽く閉じるなどして休みます。</div></div>`;
   setPanel(`<div class="pn-title">② 休憩（比較用）</div>
-    <div class="pn-text">トレーニングの回と時間をそろえるための休憩です。</div>
+    <div class="pn-text">トレーニングの回と時間をそろえるための休憩です。時間になると音が鳴ります。</div>
     <div class="row"><button class="btn" data-act="skip">休憩を終える（→）</button></div>`);
   const local = new AbortController();
   const t0 = performance.now();
@@ -1191,7 +1261,10 @@ async function rest(sec) {
     if (el) el.textContent = leftSec;
     if (leftSec <= 0) local.abort();
   }, 250);
-  try { await waitAct({ ArrowRight: 'skip' }, local.signal); } finally { clearInterval(iv); }
+  let act;
+  try { act = await waitAct({ ArrowRight: 'skip' }, local.signal); } finally { clearInterval(iv); }
+  // 目を閉じていても分かるように、時間になったら音で知らせる（自分で終えたときは鳴らさない）
+  if (act === null) audio.play('done');
 }
 
 // ⚑が本文の枠に収まらなければ、1行の字数を枠いっぱいまで広げ、文字を1pxずつ小さくする（このトレーニングの間だけ）
@@ -1351,6 +1424,7 @@ async function runSession(type) {
 function startSession(type) {
   if (S || !STORIES.length) return;
   if (!state.ackCaution) { showCaution(() => startSession(type)); return; }
+  audio.ensure();
   runSession(type);
 }
 
@@ -1363,6 +1437,11 @@ const COMMANDS = {
     state.progress.cursors[state.progress.storyId] = 0;
     save();
     go('home');
+  },
+  'test-sound': () => {
+    // 作ったばかりの AudioContext がすぐには動き出さないブラウザ（Firefox など）があるので、動き出してから鳴らす
+    const ctx = audio.ensure();
+    if (ctx) ctx.resume().then(() => audio.schedule([['tick', 0], ['tick', 400], ['tick', 800], ['go', 1200], ['end', 2000]]), () => {});
   },
   'export-json': () => download(`six-second-reading-${dayKey(new Date())}.json`,
     JSON.stringify({ app: 'six-second-reading', exportedAt: new Date().toISOString(), state }, null, 1), 'application/json'),
