@@ -1,0 +1,17 @@
+{
+  "name": "6秒リーディング",
+  "short_name": "6秒リーディング",
+  "description": "6秒の黙読で読めた字数を測り、目のストレッチと目で追う練習をはさんで、もう一度測る個人用の練習ツール",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f1ea",
+  "theme_color": "#fffdf8",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

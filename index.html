@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#fffdf8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1f1d1a" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="icons/icon-192.png">
 <title>6秒リーディング</title>
 <style>
 :root {
@@ -21,8 +24,8 @@
   --ok: #2f8a57;
   --shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 6px 18px rgba(0, 0, 0, .05);
   --ui: "Yu Gothic UI", "Meiryo UI", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
-  --mincho: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Noto Serif JP", serif;
-  --gothic: "Yu Gothic", "YuGothic", "Meiryo", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --mincho: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Noto Serif JP", "Noto Serif CJK JP", serif;
+  --gothic: "Yu Gothic", "YuGothic", "Meiryo", "Hiragino Sans", "Noto Sans JP", "Noto Sans CJK JP", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -43,7 +46,10 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
-body { background: var(--bg); color: var(--ink); font-family: var(--ui); font-size: 15px; line-height: 1.6; min-height: 100vh; }
+html { -webkit-text-size-adjust: 100%; }
+/* スマホで、引っぱって再読み込みや、ダブルタップでの拡大が起きないようにする */
+body { background: var(--bg); color: var(--ink); font-family: var(--ui); font-size: 15px; line-height: 1.6; min-height: 100vh; overscroll-behavior-y: none; }
+button, .passage { touch-action: manipulation; }
 body.running { cursor: none; }
 button, select, input { font: inherit; color: inherit; }
 a { color: var(--accent); }
@@ -100,8 +106,11 @@ select { background: var(--surface); border: 1px solid var(--line); border-radiu
 .pn-text { color: var(--muted); }
 .pn-text b { color: var(--mark); font-weight: 600; }
 .pn-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.adj { display: inline-flex; gap: 6px; }
+.adj .btn { min-width: 2.8em; }
 .big-num { font-size: 22px; font-variant-numeric: tabular-nums; color: var(--mark); }
 #mk-need.warn { color: var(--mark); font-weight: 600; }
+.mk-need-sm { font-size: 13px; line-height: 1.4; }
 .stage { position: relative; }
 
 .passage { --fs: 22px; --cpl: 40; margin: 0 auto; width: calc(var(--cpl) * 1em); max-width: calc(100% - 2.4em); font-size: var(--fs); line-height: 1.9; font-family: var(--mincho); background: var(--surface); padding: .7em 1.2em 0; border-radius: 10px; box-shadow: var(--shadow); border: 1px solid var(--line); overflow: hidden; box-sizing: content-box; line-break: strict; user-select: none; }
@@ -111,9 +120,13 @@ select { background: var(--surface); border: 1px solid var(--line); border-radiu
 .passage .c, .passage .w { position: relative; }
 .passage.is-hidden .c, .passage.is-hidden .w { visibility: hidden; }
 .passage .flag { box-shadow: inset 0 -.2em 0 var(--flag); }
-.passage .flag::after { content: "⚑"; visibility: visible; position: absolute; left: 50%; top: -.95em; transform: translateX(-50%); font-family: var(--ui); font-size: .7em; line-height: 1; color: var(--flag); }
+/* スマホのトレーニングでは本文が10px台まで小さくなるので、⚑は12pxより小さくしない */
+.passage .flag::after { content: "⚑"; visibility: visible; position: absolute; left: 50%; top: -.95em; transform: translateX(-50%); font-family: var(--ui); font-size: max(.7em, 12px); line-height: 1; color: var(--flag); }
+.passage { -webkit-tap-highlight-color: transparent; }
 .passage.is-marking .c { cursor: pointer; }
-.passage.is-marking .c:hover { outline: 1px solid var(--accent); }
+@media (hover: hover) {
+  .passage.is-marking .c:hover { outline: 1px solid var(--accent); }
+}
 .passage .c.read { background: var(--accent-soft); }
 .passage .c.mark { background: transparent; color: var(--mark); box-shadow: inset 0 -.2em 0 var(--mark); }
 .fixation { position: absolute; transform: translate(-50%, -50%); width: 1.7em; height: 1.7em; border-radius: 50%; border: 2px solid var(--accent); color: var(--accent); display: grid; place-items: center; font-family: var(--ui); font-weight: 700; font-size: 22px; pointer-events: none; }
@@ -128,7 +141,7 @@ select { background: var(--surface); border: 1px solid var(--line); border-radiu
 #overlay { position: fixed; inset: 0; z-index: 50; background: var(--bg); }
 #overlay[hidden] { display: none; }
 #overlay .dot { position: absolute; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); transform: translate(-50%, -50%); }
-#overlay .ov-bar { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; color: var(--muted); white-space: nowrap; }
+#overlay .ov-bar { position: absolute; left: 12px; right: 12px; bottom: 22px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; align-items: center; color: var(--muted); white-space: nowrap; }
 
 /* 結果・記録 */
 .result-main { font-size: 20px; margin: 4px 0 12px; }
@@ -166,8 +179,34 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: grid; place-items: center; z-index: 100; padding: 16px; }
 .modal { background: var(--surface); color: var(--ink); max-width: 560px; border-radius: 14px; padding: 22px 26px; box-shadow: 0 10px 40px rgba(0, 0, 0, .3); }
 .modal ul { padding-left: 1.2em; }
-#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 8px; z-index: 200; max-width: min(640px, calc(100% - 32px)); }
+/* 左右16pxの内側で中央に置く（left:50% だと、スマホで幅が半分に縮んで縦長になるため） */
+#toast { position: fixed; left: 16px; right: 16px; bottom: 24px; width: fit-content; max-width: 640px; margin: 0 auto; background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 8px; z-index: 200; }
 #toast[hidden] { display: none; }
+select { max-width: 100%; }
+
+/* スマホ（幅600px以下）。上の帯と案内の欄を詰めて、本文に使える高さを増やす */
+@media (max-width: 600px) {
+  .topbar { gap: 8px; height: 46px; padding: 0 10px; }
+  .brand, .wide-only { display: none; }
+  #nav { margin-left: 0; flex: 1; justify-content: space-between; }
+  #nav button { padding: 6px 8px; }
+  #session-bar { flex: 1; gap: 8px; justify-content: space-between; }
+  .steps { gap: 2px; }
+  .steps li:not(.on) .t { display: none; }
+  main { padding: 12px; }
+  h2 { font-size: 20px; }
+  .hero h1 { font-size: 24px; }
+  .card { padding: 14px; }
+  .panel { height: 12rem; overflow-y: auto; justify-content: flex-start; }
+  .pn-title { font-size: 16px; }
+  .pn-text { font-size: 14px; }
+  .passage { max-width: calc(100% - 1.2em - 2px); padding: .5em .6em 0; }
+  .st-beat { font-size: 72px; }
+  .form { grid-template-columns: 1fr; gap: 4px 0; }
+  .form .ctl { margin-bottom: 10px; }
+  .form input[type="range"] { width: auto; flex: 1; min-width: 140px; }
+  .modal { padding: 18px; }
+}
 </style>
 </head>
 <body>
@@ -206,6 +245,12 @@ const fmtMult = v => String(Math.round(v * 100) / 100);
 const signed = n => (n > 0 ? `+${n}` : String(n));
 const idxOr = (i, fallback) => (i < 0 ? fallback : i);
 
+// 指で操作する端末（スマホ）では、キー操作の案内を出さず「クリック」を「タップ」と書く
+const TOUCH = matchMedia('(pointer: coarse)').matches;
+const TAP = TOUCH ? 'タップ' : 'クリック';
+const kb = k => (TOUCH ? '' : `（${k}）`);
+const narrow = () => matchMedia('(max-width: 600px)').matches;
+
 const COMP = [
   { key: 'good', label: 'よく分かった' },
   { key: 'ok', label: 'だいたい' },
@@ -222,7 +267,7 @@ const ROUND_LABEL = { reached: '届いた', readable: '読めてしまった', s
 // ---------- 保存 ----------
 const STORE_KEY = 'six-second-reading.v1';
 const DEFAULT_SETTINGS = {
-  fontSize: 22,
+  fontSize: narrow() ? 17 : 22,
   cpl: 40,
   font: 'mincho',
   volume: 0.5,
@@ -558,7 +603,7 @@ function renderHome() {
       <li>① 事前計測（6秒）</li><li>② 目のストレッチ</li><li>③ トレーニング（6秒×3回）</li><li>④ 再計測（6秒）</li>
     </ol>
     <div class="row">
-      <button class="btn primary big" data-cmd="start">トレーニングを始める（Enter）</button>
+      <button class="btn primary big" data-cmd="start">トレーニングを始める${kb('Enter')}</button>
       <button class="btn" data-cmd="start-control">比較用の回（トレーニングなし）</button>
     </div>
   </section>
@@ -586,7 +631,8 @@ function renderHome() {
 }
 
 function chartSvg(list) {
-  const W = 760, H = 240, L = 44, R = 16, T = 14, B = 30;
+  // スマホでは横幅を詰め、文字が小さくなりすぎないようにする
+  const W = narrow() ? 420 : 760, H = 240, L = 44, R = 16, T = 14, B = 30;
   const n = list.length;
   // 縦軸は0からにせず、記録のある範囲に絞る。数字の差が見えるようにし、誤差の大きさは±5字の帯で示す
   const vals = list.flatMap(s => [s.pre.count, s.post.count]);
@@ -608,8 +654,8 @@ function chartSvg(list) {
   const post = list.map((s, i) => s.type === 'train'
     ? `<circle cx="${x(i)}" cy="${y(s.post.count)}" r="4.5" class="pt-post"><title>${fmtDateTime(s.date)} 再計測 ${s.post.count}字</title></circle>`
     : `<rect x="${x(i) - 4.5}" y="${y(s.post.count) - 4.5}" width="9" height="9" class="pt-ctrl"><title>${fmtDateTime(s.date)} 再計測（比較用）${s.post.count}字</title></rect>`).join('');
-  // 日付は最大7つ。等間隔に置き、最後の回は必ず出す（最後の回との間が間隔の6割に満たないものは省く）
-  const every = Math.max(1, Math.ceil((n - 1) / 6));
+  // 日付は最大7つ（スマホでは5つ）。等間隔に置き、最後の回は必ず出す（最後の回との間が間隔の6割に満たないものは省く）
+  const every = Math.max(1, Math.ceil((n - 1) / (W < 600 ? 4 : 6)));
   const marks = Array.from({ length: n }, (_, i) => i).filter(i => i % every === 0 && n - 1 - i >= Math.ceil(every * 0.6)).concat(n - 1);
   const labels = marks.map(i =>
     `<text x="${x(i)}" y="${H - 8}" class="axis" text-anchor="middle">${fmtMD(list[i].date)}</text>`).join('');
@@ -643,7 +689,7 @@ function renderHistory() {
       <span><i style="background:var(--accent)"></i>事前計測（毎回初めて読む文章。伸びを見るならこの線）</span>
       <span><i style="border:2px solid var(--flag)"></i>再計測（トレーニング後）</span>
       <span><i style="border:2px solid var(--muted);border-radius:0"></i>再計測（比較用の回）</span>
-      <span><i style="background:var(--band);border-radius:2px"></i>事前計測の±5字（クリック位置の誤差の目安）</span>
+      <span><i style="background:var(--band);border-radius:2px"></i>事前計測の±5字（${TAP}位置の誤差の目安）</span>
     </div>` : ''}
     ${ss.length > recent.length ? `<p class="muted" style="font-size:13px">グラフは直近${recent.length}回分です。表にはすべての記録があります。</p>` : ''}
   </div>
@@ -677,9 +723,9 @@ function renderSettings() {
     <h3>文章の表示</h3>
     <div class="form">
       <label for="set-fs">文字の大きさ</label>
-      <div class="ctl"><input id="set-fs" type="range" min="16" max="36" step="1" data-set="fontSize" value="${s.fontSize}"><output data-out="fontSize"></output></div>
+      <div class="ctl"><input id="set-fs" type="range" min="14" max="36" step="1" data-set="fontSize" value="${s.fontSize}"><output data-out="fontSize"></output></div>
       <label for="set-cpl">1行の字数</label>
-      <div class="ctl"><input id="set-cpl" type="range" min="20" max="50" step="1" data-set="cpl" value="${s.cpl}"><output data-out="cpl"></output></div>
+      <div class="ctl"><input id="set-cpl" type="range" min="20" max="50" step="1" data-set="cpl" value="${s.cpl}"><output data-out="cpl"></output><span class="muted">画面の幅に入る字数より多くはなりません</span></div>
       <label for="set-font">書体</label>
       <div class="ctl"><select id="set-font" data-set="font">${opt('font', 'mincho', '明朝')}${opt('font', 'gothic', 'ゴシック')}</select></div>
     </div>
@@ -752,7 +798,7 @@ function renderAbout() {
   <div class="card">
     <h3>記録の見かた</h3>
     <ul>
-      <li>6秒で読めるのは数十字なので、クリックする位置が数字ずれるだけで値が1割ほど動きます。±5字くらいの差は誤差と考えてください。</li>
+      <li>6秒で読めるのは数十字なので、${TAP}する位置が数字ずれるだけで値が1割ほど動きます。±5字くらいの差は誤差と考えてください。</li>
       <li>伸びを見るなら、毎回初めて読む文章で測る「事前計測」の推移を見てください。</li>
       <li>再計測は、トレーニングで目を通した範囲より先の、まだ読んでいない文章で行います（設定で同じ文章にもできます）。</li>
       <li>比較用の回の伸びと比べると、トレーニングの効果と、慣れや日による変動を見分けやすくなります。</li>
@@ -783,7 +829,7 @@ function showResult(rec) {
   <div class="card">
     <div class="result-main">事前 <b>${rec.pre.count}</b>字 → 再計測 <b>${rec.post.count}</b>字
       <span class="diff" style="color:${diff > 5 ? 'var(--ok)' : 'var(--muted)'}">（${signed(diff)}字${noise ? '・誤差の範囲' : ''}）</span></div>
-    <p class="muted" style="margin-top:0">±5字くらいはクリック位置の誤差の範囲です。${rec.post.mode === 'same' ? '再計測は最初と同じ文章なので、慣れの分も含んだ体感の数字です。' : '再計測は続きの、まだ読んでいない文章で行いました。'}</p>
+    <p class="muted" style="margin-top:0">±5字くらいは${TAP}位置の誤差の範囲です。${rec.post.mode === 'same' ? '再計測は最初と同じ文章なので、慣れの分も含んだ体感の数字です。' : '再計測は続きの、まだ読んでいない文章で行いました。'}</p>
     <dl class="kv">
       ${base ? `<dt>事前計測の推移</dt><dd>今回 ${rec.pre.count}字 ／ それまでの直近${base.n}回の中央値 ${base.value}字（${signed(rec.pre.count - base.value)}字）</dd>` : ''}
       <dt>内容の分かり具合</dt><dd>事前：${COMP_LABEL[rec.pre.comp]}　再計測：${COMP_LABEL[rec.post.comp]}</dd>
@@ -795,7 +841,7 @@ function showResult(rec) {
     </dl>
   </div>
   <div class="row">
-    <button class="btn primary" data-nav="home">ホームへ（Enter）</button>
+    <button class="btn primary" data-nav="home">ホームへ${kb('Enter')}</button>
     <button class="btn" data-nav="history">記録を見る</button>
   </div>`;
 }
@@ -830,15 +876,49 @@ function setStep(step) {
 function showSessionUI(type) {
   $('#nav').hidden = true;
   $('#session-bar').hidden = false;
-  $('#steps').innerHTML = type === 'train'
-    ? '<li data-step="pre">① 事前計測</li><li data-step="stretch">② ストレッチ</li><li data-step="train">③ トレーニング</li><li data-step="post">④ 再計測</li>'
-    : '<li data-step="pre">① 事前計測</li><li data-step="stretch">② 休憩</li><li data-step="train">③ ふつうに読む</li><li data-step="post">④ 再計測</li>';
+  // スマホでは、今の手順だけ名前を出す（.t）
+  const names = type === 'train' ? ['事前計測', 'ストレッチ', 'トレーニング', '再計測'] : ['事前計測', '休憩', 'ふつうに読む', '再計測'];
+  $('#steps').innerHTML = ['pre', 'stretch', 'train', 'post']
+    .map((step, i) => `<li data-step="${step}">${'①②③④'[i]}<span class="t"> ${names[i]}</span></li>`).join('');
   $('#app').innerHTML = '<div class="panel" id="panel"></div><div class="stage" id="stage"></div>';
+}
+
+// スマホの画面が途中で消えないように、セッションの間は点けたままにする（対応していないブラウザでは何もしない）
+const wake = {
+  lock: null,
+  async on() {
+    if (!S || this.lock || !navigator.wakeLock || document.hidden) return;
+    try {
+      const lock = await navigator.wakeLock.request('screen');
+      if (!S || this.lock) { lock.release().catch(() => {}); return; }
+      this.lock = lock;
+      // 画面を切り替えると自動で外れるので、そのときは覚えている lock も捨てる
+      lock.addEventListener('release', () => { if (this.lock === lock) this.lock = null; });
+    } catch { /* 省電力モードなどで断られたら、そのまま続ける */ }
+  },
+  off() {
+    this.lock?.release().catch(() => {});
+    this.lock = null;
+  },
+};
+
+// スマホの「戻る」でアプリが閉じないように、セッション中は履歴を2つ積んでおき、戻るでは中断の確認を出す。
+// 積むのは指やキーの操作の中だけにする（操作なしで積んだ履歴は、Chrome が「戻る」で飛ばしてしまうため）。
+// 戻るで減った分は、次に画面を押したときに積み直す
+const GUARD = 2;
+const guardDepth = () => history.state?.session || 0;
+let lastDepth = 0; // 「戻る」と「進む」を見分けるため、直前の深さを覚えておく
+function armGuard() {
+  while (guardDepth() < GUARD) history.pushState({ session: guardDepth() + 1 }, '');
+  lastDepth = guardDepth();
 }
 
 function endSessionUI() {
   S = null;
   audio.cancel();
+  wake.off();
+  if (guardDepth()) history.go(-guardDepth());
+  lastDepth = 0;
   document.body.classList.remove('running');
   $('#overlay').hidden = true;
   $('#overlay').innerHTML = '';
@@ -976,21 +1056,32 @@ function markStep(p, label) {
     let k = -1, comp = null, finished = false;
     p.classList.remove('is-hidden');
     p.classList.add('is-marking');
-    setPanel(`
-      <div class="pn-title">${label}：ストップ。読めた最後の文字をクリックし、内容の分かり具合を選んでください</div>
+    // 枠に見えている最後の文字。ここまで読めたなら、画面の字数が足りずに測りきれていない
+    const pb = p.getBoundingClientRect().bottom;
+    const lastShown = spans.reduce((a, el, j) => (el.getBoundingClientRect().bottom <= pb ? j : a), -1);
+    const count = '<span>読めた字数 <b class="big-num" id="mk-count">—</b></span>';
+    // ◀ ▶ は指で使う端末だけに出す（パソコンは ← → キーで足りる。並びも前のまま保つ）
+    const adj = TOUCH ? '<span class="adj"><button class="btn sm" data-mk="prev" aria-label="1字戻す">◀</button><button class="btn sm" data-mk="next" aria-label="1字進む">▶</button></span>' : '';
+    const comps = COMP.map((c, j) => `<button class="btn sm" data-comp="${c.key}">${TOUCH ? '' : `${j + 1} `}${c.label}</button>`).join('');
+    const redoBtn = '<button class="btn sm" data-mk="redo">測り直す</button>';
+    const okBtn = `<button class="btn primary" data-mk="ok" id="mk-ok" disabled>確定${kb('Enter')}</button>`;
+    // スマホでは行を組み替えて、案内の欄に収める。何をするかは #mk-need で案内する
+    setPanel(narrow() ? `
+      <div class="pn-row"><span class="pn-title">${label}：ストップ</span><span class="spacer"></span>${redoBtn}</div>
+      <div class="pn-row">${count}${adj}<span class="spacer"></span>${okBtn}</div>
+      <div class="pn-row"><span>分かり具合</span>${comps}</div>
+      <div class="muted mk-need-sm" id="mk-need"></div>` : `
+      <div class="pn-title">${label}：ストップ。読めた最後の文字を${TAP}し、内容の分かり具合を選んでください</div>
       <div class="pn-row">
-        <span>読めた字数 <b class="big-num" id="mk-count">—</b></span>
+        ${count}${adj}
         <span class="muted" id="mk-hover"></span>
-        <span class="muted">← → で1字ずつ調整できます</span>
+        <span class="muted">${TOUCH ? '◀ ▶ で1字ずつ調整できます' : '← → で1字ずつ調整できます'}</span>
         <span class="spacer"></span>
         <span class="muted" id="mk-need"></span>
       </div>
       <div class="pn-row">
-        <span>内容の分かり具合</span>
-        ${COMP.map((c, j) => `<button class="btn sm" data-comp="${c.key}">${j + 1} ${c.label}</button>`).join('')}
-        <span class="spacer"></span>
-        <button class="btn sm" data-mk="redo">測り直す</button>
-        <button class="btn primary" data-mk="ok" id="mk-ok" disabled>確定（Enter）</button>
+        <span>内容の分かり具合</span>${comps}
+        <span class="spacer"></span>${redoBtn}${okBtn}
       </div>`);
     const refresh = () => {
       spans.forEach((el, j) => {
@@ -1000,12 +1091,14 @@ function markStep(p, label) {
       $('#mk-count').textContent = k >= 0 ? `${k + 1}字` : '—';
       $$('[data-comp]').forEach(b => b.classList.toggle('on', b.dataset.comp === comp));
       $('#mk-ok').disabled = !(k >= 0 && comp);
-      // 確定できない理由を、確定ボタンの上に出しておく
+      // 確定できない理由を、確定ボタンの上に出しておく。確定できるときに、見えている最後の字を選んでいたら、
+      // 画面の字数が足りずに測りきれていないかもしれないので、文字を小さくできることを知らせる
       const need = $('#mk-need');
-      need.textContent = k < 0 && !comp ? '文字のクリックと分かり具合を選ぶと、確定できます'
-        : k < 0 ? '読めた最後の文字をクリックすると、確定できます'
-        : !comp ? '分かり具合を選ぶと、確定できます（1・2・3キーでも選べます）' : '';
-      if (!need.textContent) need.classList.remove('warn');
+      const reason = k < 0 && !comp ? (TOUCH ? '読めた最後の文字のタップと、分かり具合を選ぶと確定できます' : '文字のクリックと分かり具合を選ぶと、確定できます')
+        : k < 0 ? `読めた最後の文字を${TAP}すると、確定できます`
+        : !comp ? `分かり具合を選ぶと、確定できます${TOUCH ? '' : '（1・2・3キーでも選べます）'}` : '';
+      need.textContent = reason || (k === lastShown ? '画面の最後の字です。文字を小さくすると先まで測れます' : '');
+      if (!reason) need.classList.remove('warn');
     };
     const cleanup = () => {
       finished = true;
@@ -1026,24 +1119,51 @@ function markStep(p, label) {
         done({ redo: true, markIndex: k >= 0 ? Number(spans[k].dataset.i) : null });
       }
     };
+    const step = d => {
+      if (d > 0) k = Math.min(spans.length - 1, k + 1);
+      else if (k > 0) k--;
+      refresh();
+    };
+    // 行と行のすき間など、文字から少し外れたところを押したときは、いちばん近い文字にする（同じ行を優先）
+    const nearest = (x, y) => {
+      const bottom = p.getBoundingClientRect().bottom;
+      let best = -1, bestD = Infinity;
+      spans.forEach((el, j) => {
+        const r = el.getBoundingClientRect();
+        if (r.top >= bottom) return; // 枠の外に隠れている文字は選ばない
+        const dx = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
+        const dy = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+        const d = dy * 4 + dx;
+        if (d < bestD) { bestD = d; best = j; }
+      });
+      return best;
+    };
     const onClick = e => {
       const c = e.target.closest('.c');
       if (c && pos.has(c)) { k = pos.get(c); refresh(); return; }
+      if (e.target.closest('#passage') === p) {
+        const j = nearest(e.clientX, e.clientY);
+        if (j >= 0) { k = j; refresh(); }
+        return;
+      }
       const b = e.target.closest('[data-comp],[data-mk]');
       if (!b || b.disabled) return;
       b.blur();
       if (b.dataset.comp) { comp = b.dataset.comp; refresh(); }
+      else if (b.dataset.mk === 'prev' || b.dataset.mk === 'next') step(b.dataset.mk === 'next' ? 1 : -1);
       else if (b.dataset.mk === 'ok') submit();
       else if (b.dataset.mk === 'redo') redo();
     };
     const onOver = e => {
+      const h = $('#mk-hover');
+      if (!h) return; // スマホの並びには、この欄がない
       const c = e.target.closest('.c');
-      $('#mk-hover').textContent = c && pos.has(c) ? `（ここまで ${pos.get(c) + 1}字）` : '';
+      h.textContent = c && pos.has(c) ? `（ここまで ${pos.get(c) + 1}字）` : '';
     };
     const onKey = e => {
       if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || modalOpen()) return;
-      if (e.key === 'ArrowRight') { e.preventDefault(); k = Math.min(spans.length - 1, k + 1); refresh(); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); if (k > 0) { k--; refresh(); } }
+      if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
       else if (/^[123]$/.test(e.key)) { comp = COMP[Number(e.key) - 1].key; refresh(); }
       else if (e.key === 'Enter') { e.preventDefault(); submit(); }
     };
@@ -1076,7 +1196,7 @@ async function measure(kind) {
     setPanel(`
       <div class="pn-title">${kind === 'pre' ? '①' : '④'} ${label}：ふつうの速さで6秒間、黙読します</div>
       <div class="pn-text">読み始めの位置に3・2・1の数字が出て（ピッ・ピッ・ピッ）、ポーンで文章が現れ、6秒たつと音が鳴って消えます。どこまで読めたかを覚えておいてください。${where}</div>
-      <div class="row"><button class="btn primary" data-act="go">開始（Space）</button></div>`);
+      <div class="row"><button class="btn primary" data-act="go">開始${kb('Space')}</button></div>`);
     await waitAct({ ' ': 'go', Enter: 'go' });
     setPanel(`<div class="pn-title muted">${label}：読んでいます…</div>`);
     const glimpse = idxOr(indexAtCount(ps.m, ps.start, Math.round(S.est * 1.5)), ps.m.n - 1);
@@ -1141,12 +1261,13 @@ function runBeats(ex, beat, reps, screen) {
     const ov = $('#overlay');
     let i = 0, paused = false, timer = 0, ended = false;
     const controls = `
-      <button class="btn sm" data-beat="pause" id="pause-btn">一時停止（Space）</button>
-      <button class="btn sm" data-beat="skip">飛ばす（→）</button>
-      <button class="btn sm" data-beat="skipall">ストレッチを全部飛ばす</button>`;
+      <button class="btn sm" data-beat="pause" id="pause-btn">一時停止${kb('Space')}</button>
+      <button class="btn sm" data-beat="skip">飛ばす${kb('→')}</button>
+      <button class="btn sm" data-beat="skipall"><span class="wide-only">ストレッチを</span>全部飛ばす</button>`;
     if (screen) {
-      // 点は最初の拍の音が鳴るまで隠しておく（位置が決まる前に左上に出ないように）
-      ov.innerHTML = `<div class="dot" id="dot" style="visibility:hidden"></div><div class="ov-bar"><span id="ov-count"></span>${controls}<span>Esc 中断</span></div>`;
+      // 点は最初の拍の音が鳴るまで隠しておく（位置が決まる前に左上に出ないように）。
+      // この画面は上の帯を覆うので、中断のボタンもここに置く
+      ov.innerHTML = `<div class="dot" id="dot" style="visibility:hidden"></div><div class="ov-bar"><span id="ov-count"></span>${controls}<button class="btn sm" data-beat="abort">中断${kb('Esc')}</button></div>`;
       ov.hidden = false;
     } else {
       setPanel(`<div class="pn-title">② ストレッチ：${ex.name}</div><div class="row">${controls}</div>`);
@@ -1157,8 +1278,9 @@ function runBeats(ex, beat, reps, screen) {
       if (screen) {
         const dot = $('#dot');
         dot.style.left = ex.screen === 'lr' ? (side === 0 ? '5vw' : '95vw') : '50vw';
-        // 下の点は、画面下の操作バーに重ならない高さに置く
-        dot.style.top = ex.screen === 'ud' ? (side === 0 ? '5vh' : 'calc(100vh - 90px)') : '50vh';
+        // 下の点は、画面下の操作バー（スマホでは折り返して高くなる）に重ならない高さに置く
+        const barTop = ov.querySelector('.ov-bar').getBoundingClientRect().top;
+        dot.style.top = ex.screen === 'ud' ? (side === 0 ? '5vh' : `${barTop - 34}px`) : '50vh';
         dot.style.visibility = '';
         $('#ov-count').textContent = `${ex.name} ${count} / ${reps}`;
       } else {
@@ -1188,7 +1310,7 @@ function runBeats(ex, beat, reps, screen) {
     const toggle = () => {
       paused = !paused;
       const b = $('#pause-btn');
-      if (b) b.textContent = paused ? '再開（Space）' : '一時停止（Space）';
+      if (b) b.textContent = `${paused ? '再開' : '一時停止'}${kb('Space')}`;
       clearTimeout(timer);
       if (!paused) timer = setTimeout(tick, beat); // 再開は1拍おいてから（切り替えが速くなりすぎないように）
     };
@@ -1201,7 +1323,9 @@ function runBeats(ex, beat, reps, screen) {
       const b = e.target.closest('[data-beat]');
       if (!b) return;
       b.blur();
-      if (b.dataset.beat === 'pause') toggle(); else end(b.dataset.beat);
+      if (b.dataset.beat === 'abort') requestAbort();
+      else if (b.dataset.beat === 'pause') toggle();
+      else end(b.dataset.beat);
     };
     const onAbort = () => end(ABORT);
     document.addEventListener('keydown', onKey);
@@ -1224,9 +1348,9 @@ async function stretch() {
       <div class="pn-title">② ストレッチ ${x + 1}/4：${ex.name}（${reps}回）</div>
       <div class="pn-text">${esc(screen ? ex.screenHow : ex.how)}</div>
       <div class="row">
-        <button class="btn primary" data-act="go">始める（Space）</button>
-        <button class="btn" data-act="skip">この種目を飛ばす（→）</button>
-        <button class="btn" data-act="skipall">ストレッチを全部飛ばす</button>
+        <button class="btn primary" data-act="go">始める${kb('Space')}</button>
+        <button class="btn" data-act="skip"><span class="wide-only">この種目を</span>飛ばす${kb('→')}</button>
+        <button class="btn" data-act="skipall"><span class="wide-only">ストレッチを</span>全部飛ばす</button>
         <span class="muted" id="auto-start">6秒後に始まります</span>
       </div>`);
     const local = new AbortController();
@@ -1252,7 +1376,7 @@ async function rest(sec) {
     <div class="st-how">比較用の回です。ストレッチの代わりに、目を軽く閉じるなどして休みます。</div></div>`;
   setPanel(`<div class="pn-title">② 休憩（比較用）</div>
     <div class="pn-text">トレーニングの回と時間をそろえるための休憩です。時間になると音が鳴ります。</div>
-    <div class="row"><button class="btn" data-act="skip">休憩を終える（→）</button></div>`);
+    <div class="row"><button class="btn" data-act="skip">休憩を終える${kb('→')}</button></div>`);
   const local = new AbortController();
   const t0 = performance.now();
   const iv = setInterval(() => {
@@ -1267,17 +1391,24 @@ async function rest(sec) {
   if (act === null) audio.play('done');
 }
 
-// ⚑が本文の枠に収まらなければ、1行の字数を枠いっぱいまで広げ、文字を1pxずつ小さくする（このトレーニングの間だけ）
+// ⚑が本文の枠に収まらなければ、1行の字数を枠いっぱいまで広げ、文字を1pxずつ小さくする（このトレーニングの間だけ）。
+// 目で追うだけで読まなくてよいので、スマホの狭い画面では10pxまで小さくする
 function fitFlag(p, flag) {
   const off = () => !flag || flag.getBoundingClientRect().bottom > p.getBoundingClientRect().bottom - 2;
   let fs = state.settings.fontSize, shrunk = false;
   const width = $('#stage').clientWidth - 48;
-  while (off() && fs >= 14) {
+  const minFs = narrow() ? 10 : 14;
+  while (off() && fs >= minFs) {
     p.style.setProperty('--cpl', clamp(Math.floor(width / fs), state.settings.cpl, 60));
     p.style.setProperty('--fs', `${fs}px`);
     fitPassage();
     shrunk = true;
     fs--;
+  }
+  // スマホでそれでも収まらなければ、行の間隔を詰める
+  if (off() && narrow()) {
+    p.style.lineHeight = '1.5';
+    fitPassage();
   }
   return { shrunk, offscreen: off() };
 }
@@ -1299,8 +1430,9 @@ async function training() {
     setPanel(`
       <div class="pn-title">③ トレーニング ${r + 1}/3：読めないくらいの速さで、⚑まで目で追います</div>
       <div class="pn-text">⚑は ${S.preRes.count}字 × ${fmtMult(S.mult)} ≈ ${S.targetCount}字の位置です。読もうとせず、文字を目で追うだけで構いません。
-        ${offscreen ? '<b>⚑が画面の外にあります。ウィンドウを大きく（F11で全画面）してから始めてください。</b>' : shrunk ? '⚑が画面に収まるように、このトレーニングの間だけ1行の字数と文字の大きさを変えています。' : ''}</div>
-      <div class="row">${needStart ? '<button class="btn primary" data-act="go">開始（Space）</button>' : '<span class="muted">3・2・1のあと、読み始めに戻って追います。</span>'}</div>`);
+        ${offscreen ? (TOUCH ? '<b>⚑が画面に入りきりません。見えている最後の行まで目で追ってください。</b>' : '<b>⚑が画面の外にあります。ウィンドウを大きく（F11で全画面）してから始めてください。</b>')
+          : shrunk ? (narrow() ? '⚑が収まるよう、文字を小さくしています。' : '⚑が画面に収まるように、このトレーニングの間だけ1行の字数と文字の大きさを変えています。') : ''}</div>
+      <div class="row">${needStart ? `<button class="btn primary" data-act="go">開始${kb('Space')}</button>` : '<span class="muted">3・2・1のあと、読み始めに戻って追います。</span>'}</div>`);
     if (needStart) {
       await waitAct({ ' ': 'go', Enter: 'go' });
       $('#panel .row').innerHTML = '<span class="muted">⚑まで目で追います…</span>';
@@ -1318,7 +1450,7 @@ async function training() {
     }
     setPanel(`
       <div class="pn-title">${r + 1}回目はどうでしたか？</div>
-      <div class="row">${ROUNDS.map((x, j) => `<button class="btn" data-act="${x.key}">${j + 1} ${x.label}</button>`).join('')}</div>`);
+      <div class="row">${ROUNDS.map((x, j) => `<button class="btn" data-act="${x.key}">${TOUCH ? '' : `${j + 1} `}${x.label}</button>`).join('')}</div>`);
     S.rounds.push(await waitAct({ 1: 'reached', 2: 'readable', 3: 'short' }));
   }
 }
@@ -1332,7 +1464,7 @@ async function controlReading() {
     setPanel(`
       <div class="pn-title">③ ふつうに読む ${r + 1}/3（比較用）</div>
       <div class="pn-text">事前計測と同じ文章を、ふつうの速さで6秒間読みます。</div>
-      <div class="row"><button class="btn primary" data-act="go">開始（Space）</button></div>`);
+      <div class="row"><button class="btn primary" data-act="go">開始${kb('Space')}</button></div>`);
     await waitAct({ ' ': 'go', Enter: 'go' });
     setPanel(`<div class="pn-title muted">ふつうに読む ${r + 1}/3：読んでいます…</div>`);
     noteSeen(ps.m, S.target);
@@ -1426,6 +1558,8 @@ function startSession(type) {
   if (!state.ackCaution) { showCaution(() => startSession(type)); return; }
   audio.ensure();
   runSession(type);
+  armGuard();
+  wake.on();
 }
 
 // ---------- 操作 ----------
@@ -1520,13 +1654,37 @@ document.addEventListener('keydown', e => {
   else if (current === 'result') { e.preventDefault(); go('home'); }
 });
 
+$('#abort-btn').textContent = `中断${kb('Esc')}`;
 $('#abort-btn').addEventListener('click', e => { e.currentTarget.blur(); requestAbort(); });
 window.addEventListener('resize', () => { if (S) fitPassage(); });
 // セッションの途中で再読み込みしたり閉じたりしても、読んだ範囲は次回に持ち越す
 window.addEventListener('pagehide', () => { if (S) { commitCursors(); save(); } });
+// 「戻る」で積んでおいた履歴が戻されたら、中断の確認を出す（積み直しは、次の操作のときに行う）。
+// パソコンの「進む」で深さが増えたときは、何もしない
+window.addEventListener('popstate', () => {
+  const d = guardDepth(), back = d < lastDepth;
+  lastDepth = d;
+  if (S && back) requestAbort();
+});
+document.addEventListener('click', () => { if (S) armGuard(); }, true);
+// Esc と、単独の修飾キーは、ブラウザが「操作」と見なさないので除く
+const NOT_ACTIVATION = new Set(['Escape', 'Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'OS', 'CapsLock', 'NumLock', 'ScrollLock', 'Fn', 'FnLock', 'Hyper', 'Super', 'Symbol', 'SymbolLock']);
+document.addEventListener('keydown', e => { if (S && !NOT_ACTIVATION.has(e.key)) armGuard(); }, true);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) wake.on(); });
+// 履歴を戻したときに、前の画面のスクロール位置が結果の画面に付かないようにする
+history.scrollRestoration = 'manual';
+// セッションの途中で再読み込みされた（スマホでアプリが裏で閉じられて開き直した）ときは、積んであった履歴を片づける
+if (guardDepth()) history.go(-guardDepth());
 
 go('home');
 if (!state.ackCaution && STORIES.length) showCaution(() => {});
+
+// ホーム画面に入れて（PWA）、オフラインでも開けるようにする。
+// file:// で開いたときは使えず、マニフェストを読もうとするとエラーが出るので、http(s) のときだけ足す
+if (location.protocol !== 'file:') {
+  document.head.insertAdjacentHTML('beforeend', '<link rel="manifest" href="manifest.webmanifest">');
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>
